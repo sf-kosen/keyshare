@@ -195,6 +195,38 @@ function renderHomePage(): Response {
     .output input {
       background: #fdfcf9;
     }
+    .list {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+    }
+    .list-item {
+      border: 1px solid var(--stroke);
+      border-radius: 14px;
+      padding: 14px;
+      background: #fff;
+    }
+    .list-item.expired {
+      opacity: 0.7;
+    }
+    .list-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .list-meta {
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .list-actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
     .output .copy-row {
       display: grid;
       grid-template-columns: 1fr auto;
@@ -209,11 +241,11 @@ function renderHomePage(): Response {
       padding: 10px 12px;
       border: 1px dashed #f0d4a7;
     }
-    .danger {
-      border: 1px solid #f0c1b6;
+    .danger-btn {
+      background: #b6402c;
     }
-    .danger h2 {
-      color: #b6402c;
+    .danger-btn:hover {
+      box-shadow: 0 8px 18px rgba(182, 64, 44, 0.25);
     }
     @keyframes rise {
       from { opacity: 0; transform: translateY(14px); }
@@ -261,42 +293,35 @@ function renderHomePage(): Response {
           <input id="share-url" readonly />
           <button type="button" class="secondary" id="copy-share">コピー</button>
         </div>
-        <h2>削除トークン</h2>
+        <h2>削除キー（この端末に保存済み）</h2>
         <div class="copy-row">
           <input id="delete-token-value" readonly />
           <button type="button" class="secondary" id="copy-delete">コピー</button>
         </div>
-        <div class="note">削除トークンは作成者だけが保管してください。共有リンクには含めないでください。</div>
+        <div class="note">削除はこの端末の一覧から行えます。削除キーは共有しないでください。</div>
       </div>
     </section>
 
-    <section class="card danger">
-      <h2>削除する</h2>
-      <form id="delete-form">
-        <label for="delete-id">ID</label>
-        <input id="delete-id" name="delete-id" placeholder="共有URLまたはID" />
-        <label for="delete-token-input">削除トークン</label>
-        <input id="delete-token-input" name="delete-token" placeholder="共有作成時の削除トークン" />
-        <div class="row">
-          <span class="note">IDと削除トークンが一致すると削除されます。</span>
-          <button type="submit">削除する</button>
-        </div>
-      </form>
-      <div id="delete-status" class="status"></div>
+    <section class="card">
+      <h2>自分の共有一覧</h2>
+      <div class="note">この端末に保存された共有のみ削除できます。</div>
+      <div id="list-status" class="status"></div>
+      <div id="list-empty" class="status">まだ共有はありません。</div>
+      <div id="list" class="list"></div>
     </section>
   </main>
 
   <script>
     const createForm = document.getElementById("create-form");
-    const deleteForm = document.getElementById("delete-form");
     const createStatus = document.getElementById("create-status");
-    const deleteStatus = document.getElementById("delete-status");
     const output = document.getElementById("output");
     const shareUrl = document.getElementById("share-url");
     const deleteTokenValue = document.getElementById("delete-token-value");
-    const deleteIdInput = document.getElementById("delete-id");
-    const deleteTokenInput = document.getElementById("delete-token-input");
     const createBtn = document.getElementById("create-btn");
+    const listEl = document.getElementById("list");
+    const listEmpty = document.getElementById("list-empty");
+    const listStatus = document.getElementById("list-status");
+    const storageKey = "keyshare-items";
 
     function setStatus(el, message, ok) {
       if (!el) return;
@@ -321,6 +346,146 @@ function renderHomePage(): Response {
       } catch {
         return false;
       }
+    }
+
+    function storageAvailable() {
+      try {
+        localStorage.setItem("__keyshare_test", "1");
+        localStorage.removeItem("__keyshare_test");
+        return true;
+      } catch {
+        return false;
+      }
+    }
+
+    function loadItems() {
+      if (!storageAvailable()) return [];
+      const raw = localStorage.getItem(storageKey);
+      if (!raw) return [];
+      try {
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+          .map((item) => ({
+            id: String(item.id || ""),
+            viewUrl: String(item.viewUrl || ""),
+            deleteToken: String(item.deleteToken || ""),
+            expiresAt: Number(item.expiresAt || 0),
+            createdAt: Number(item.createdAt || 0),
+          }))
+          .filter((item) => item.id && item.viewUrl && item.deleteToken && item.expiresAt)
+          .sort((a, b) => b.createdAt - a.createdAt);
+      } catch {
+        return [];
+      }
+    }
+
+    function saveItems(items) {
+      if (!storageAvailable()) return;
+      localStorage.setItem(storageKey, JSON.stringify(items));
+    }
+
+    function formatTime(value) {
+      return new Date(value).toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" });
+    }
+
+    function removeItem(id) {
+      const items = loadItems().filter((item) => item.id !== id);
+      saveItems(items);
+      renderList();
+    }
+
+    function renderList() {
+      const items = loadItems();
+      listEl.innerHTML = "";
+
+      if (!storageAvailable()) {
+        listEmpty.hidden = false;
+        listEmpty.textContent = "このブラウザでは共有一覧を保存できません。";
+        return;
+      }
+
+      if (!items.length) {
+        listEmpty.hidden = false;
+        listEmpty.textContent = "まだ共有はありません。";
+        return;
+      }
+
+      listEmpty.hidden = true;
+      const now = Date.now();
+
+      items.forEach((item) => {
+        const expired = item.expiresAt <= now;
+        const wrapper = document.createElement("div");
+        wrapper.className = "list-item" + (expired ? " expired" : "");
+
+        const row = document.createElement("div");
+        row.className = "list-row";
+
+        const title = document.createElement("strong");
+        title.textContent = "共有URL";
+
+        const copyBtn = document.createElement("button");
+        copyBtn.type = "button";
+        copyBtn.className = "secondary";
+        copyBtn.textContent = "コピー";
+
+        row.append(title, copyBtn);
+
+        const input = document.createElement("input");
+        input.readOnly = true;
+        input.value = item.viewUrl;
+
+        const meta = document.createElement("div");
+        meta.className = "list-meta";
+        meta.textContent = "期限: " + formatTime(item.expiresAt) + (expired ? " (期限切れ)" : "");
+
+        const actions = document.createElement("div");
+        actions.className = "list-actions";
+
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "danger-btn";
+        deleteBtn.textContent = expired ? "履歴を消す" : "削除する";
+
+        actions.append(deleteBtn);
+
+        wrapper.append(row, input, meta, actions);
+        listEl.append(wrapper);
+
+        copyBtn.addEventListener("click", async () => {
+          const ok = await copyText(item.viewUrl);
+          setStatus(listStatus, ok ? "共有URLをコピーしました。" : "コピーに失敗しました。", ok);
+        });
+
+        deleteBtn.addEventListener("click", async () => {
+          if (expired) {
+            removeItem(item.id);
+            setStatus(listStatus, "履歴を削除しました。", true);
+            return;
+          }
+
+          setStatus(listStatus, "削除中...", true);
+          try {
+            const res = await fetch("/api/delete", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ id: item.id, deleteToken: item.deleteToken })
+            });
+
+            const payload = await res.json().catch(() => null);
+            if (!res.ok) {
+              const message = payload && payload.error ? payload.error : "削除に失敗しました。";
+              setStatus(listStatus, message, false);
+              return;
+            }
+            removeItem(item.id);
+            setStatus(listStatus, "削除しました。", true);
+          } catch {
+            setStatus(listStatus, "通信に失敗しました。", false);
+          }
+        });
+      });
     }
 
     document.getElementById("copy-share").addEventListener("click", async () => {
@@ -361,8 +526,18 @@ function renderHomePage(): Response {
 
         shareUrl.value = payload.viewUrl || "";
         deleteTokenValue.value = payload.deleteToken || "";
-        deleteIdInput.value = payload.id || "";
-        deleteTokenInput.value = payload.deleteToken || "";
+        if (storageAvailable()) {
+          const items = loadItems();
+          items.unshift({
+            id: payload.id,
+            viewUrl: payload.viewUrl,
+            deleteToken: payload.deleteToken,
+            expiresAt: payload.expiresAt,
+            createdAt: Date.now()
+          });
+          saveItems(items);
+          renderList();
+        }
         output.hidden = false;
         setStatus(createStatus, "共有リンクを作成しました。", true);
       } catch {
@@ -372,46 +547,7 @@ function renderHomePage(): Response {
       }
     });
 
-    deleteForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      let id = deleteIdInput.value.trim();
-      const token = deleteTokenInput.value.trim();
-      if (id.includes("/s/")) {
-        try {
-          const parsed = new URL(id);
-          const candidate = parsed.pathname.split("/s/")[1];
-          if (candidate) {
-            id = candidate;
-          }
-        } catch {
-          // ignore parse errors and use the raw input
-        }
-      }
-      if (!id || !token) {
-        setStatus(deleteStatus, "IDと削除トークンを入力してください。", false);
-        return;
-      }
-
-      setStatus(deleteStatus, "削除中...", true);
-
-      try {
-        const res = await fetch("/api/delete", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ id: id, deleteToken: token })
-        });
-
-        const payload = await res.json().catch(() => null);
-        if (!res.ok) {
-          const message = payload && payload.error ? payload.error : "削除に失敗しました。";
-          setStatus(deleteStatus, message, false);
-          return;
-        }
-        setStatus(deleteStatus, "削除しました。", true);
-      } catch {
-        setStatus(deleteStatus, "通信に失敗しました。", false);
-      }
-    });
+    renderList();
   </script>
 </body>
 </html>`;
