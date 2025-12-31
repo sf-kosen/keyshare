@@ -1,0 +1,12 @@
+﻿name = "keyshare"
+main = "src/index.ts"
+compatibility_date = "2025-12-31"
+
+[[durable_objects.bindings]]
+name = "STORE"
+class_name = "KeyshareStore"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["KeyshareStore"]
+
