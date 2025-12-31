@@ -426,7 +426,9 @@ function renderHomePage(): Response {
 
 function renderSharePage(text: string, expiresAt: number): Response {
   const safeText = escapeHtml(text);
-  const expiresLabel = new Date(expiresAt).toLocaleString("ja-JP");
+  const expiresLabel = new Date(expiresAt).toLocaleString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+  });
   const html = `<!doctype html>
 <html lang="ja">
 <head>
