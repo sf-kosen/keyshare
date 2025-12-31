@@ -50,3 +50,6 @@ wrangler dev
 - `wrangler.toml`
 - `src/index.ts`
 
+## ライセンス
+MIT
+
